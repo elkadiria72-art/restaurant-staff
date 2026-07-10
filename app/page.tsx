@@ -246,9 +246,9 @@ export default function HomePage() {
                   key={order.id}
                   order={order}
                   updating={updatingId === order.id}
-                  onStatusChange={(id, status) => {
+                  onStatusChange={(id, nextStatus) => {
                     if (id) {
-                      void handleStatusChange(id, status);
+                      void handleStatusChange(id, nextStatus);
                     }
                   }}
                   onDelete={(id) => {

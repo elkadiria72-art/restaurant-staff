@@ -7,8 +7,8 @@ type OrderCardProps = {
   order: Order;
   updating: boolean;
   highlighted?: boolean;
-  onStatusChange: (id: string, nextStatus: OrderActionStatus) => void;
-  onDelete?: (id: string) => void;
+  onStatusChange: (id: string | null | undefined, nextStatus: any) => void;
+  onDelete?: (id: string | null | undefined) => void;
 };
 
 function getOrderId(value: unknown): string | null {
