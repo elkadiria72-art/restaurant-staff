@@ -196,7 +196,11 @@ export default function HomePage() {
                   key={order.id}
                   order={order}
                   updating={updatingId === order.id}
-                  onStatusChange={handleStatusChange}
+                  onStatusChange={(id, status) => {
+                    if (id) {
+                      handleStatusChange(id, status);
+                    }
+                  }}
                 />
               );
             })
