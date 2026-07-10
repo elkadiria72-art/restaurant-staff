@@ -64,19 +64,6 @@ function normalizeOrder(value: unknown): Order | null {
     return [];
   };
 
-  const normalizedStatus = (value: string): OrderStatus => {
-    const lower = value.toLowerCase();
-    if (lower === 'in progress' || lower === 'in-progress' || lower === 'preparing') {
-      return 'In Progress';
-    }
-
-    if (lower === 'served') {
-      return 'Served';
-    }
-
-    return 'Pending';
-  };
-
   return {
     id,
     table_number:
@@ -88,7 +75,7 @@ function normalizeOrder(value: unknown): Order | null {
       typeof record.total_price === 'number' && Number.isFinite(record.total_price)
         ? record.total_price
         : Number(record.total_price) || 0,
-    status: typeof record.status === 'string' ? normalizedStatus(record.status) : 'Pending',
+    status: typeof record.status === 'string' ? normalizeOrderStatus(record.status) : 'Pending',
     created_at: typeof record.created_at === 'string' ? record.created_at : new Date().toISOString(),
   };
 }
@@ -136,6 +123,24 @@ function getRecordString(record: Record<string, unknown>, keys: string[]): strin
   }
 
   return '';
+}
+
+function normalizeOrderStatus(value: unknown): OrderStatus {
+  if (typeof value !== 'string') {
+    return 'Pending';
+  }
+
+  const lower = value.trim().toLowerCase();
+
+  if (lower === 'in progress' || lower === 'in-progress' || lower === 'preparing') {
+    return 'In Progress';
+  }
+
+  if (lower === 'served') {
+    return 'Served';
+  }
+
+  return 'Pending';
 }
 
 export default function StaffPage() {
@@ -316,42 +321,45 @@ export default function StaffPage() {
     };
   }, [playNotificationSound]);
 
-  const handleStatusChange = async (id: string, nextStatus: OrderActionStatus) => {
-    if (!id) {
+  const handleStatusChange = async (id: string | null | undefined, nextStatus: OrderActionStatus) => {
+    const resolvedId = getOrderId(id) ?? (typeof id === 'string' && id.trim() ? id : null);
+
+    if (!resolvedId) {
       return;
     }
 
-    const normalizedStatus: OrderStatus = nextStatus === 'preparing' ? 'In Progress' : nextStatus === 'served' ? 'Served' : nextStatus;
-    const persistedStatus = nextStatus === 'preparing' ? 'preparing' : nextStatus === 'served' ? 'served' : nextStatus;
+    const normalizedStatus = normalizeOrderStatus(nextStatus);
 
-    setUpdatingId(id);
+    setUpdatingId(resolvedId);
 
     try {
-      const { error } = await supabase.from('orders').update({ status: persistedStatus }).eq('id', id);
+      const { error } = await supabase.from('orders').update({ status: normalizedStatus }).eq('id', resolvedId);
 
       if (error) {
         throw error;
       }
 
-      setOrders((current) => current.map((order) => (getOrderId(order.id) === id ? { ...order, status: normalizedStatus } : order)));
+      setOrders((current) => current.map((order) => (getOrderId(order.id) === resolvedId ? { ...order, status: normalizedStatus } : order)));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'تعذر تحديث حالة الطلب.');
     } finally {
-      setUpdatingId(null);
+      setUpdatingId((current) => (current === resolvedId ? null : current));
     }
   };
 
-  const handleDeleteOrder = async (id: string) => {
-    if (!id) {
+  const handleDeleteOrder = async (id: string | null | undefined) => {
+    const resolvedId = getOrderId(id) ?? (typeof id === 'string' && id.trim() ? id : null);
+
+    if (!resolvedId) {
       return;
     }
 
-    setOrders((current) => current.filter((order) => getOrderId(order.id) !== id));
-    setHighlightedId((current) => (current === id ? null : current));
+    setOrders((current) => current.filter((order) => getOrderId(order.id) !== resolvedId));
+    setHighlightedId((current) => (current === resolvedId ? null : current));
 
     try {
-      const { error } = await supabase.from('orders').delete().eq('id', id);
+      const { error } = await supabase.from('orders').delete().eq('id', resolvedId);
 
       if (error) {
         throw error;

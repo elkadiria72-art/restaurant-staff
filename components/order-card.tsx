@@ -9,8 +9,8 @@ type OrderCardProps = {
   order: Order;
   updating: boolean;
   highlighted?: boolean;
-  onStatusChange: (id: string, nextStatus: OrderCardStatus) => void;
-  onDelete?: (id: string) => void;
+  onStatusChange: (id: string | null | undefined, nextStatus: OrderCardStatus) => void;
+  onDelete?: (id: string | null | undefined) => void;
 };
 
 function getOrderId(value: unknown): string | null {
@@ -73,11 +73,13 @@ export function OrderCard({ order, updating, highlighted = false, onStatusChange
   const orderTime = formatOrderTime(order?.created_at);
 
   const handleStatusChange = (nextStatus: OrderCardStatus) => {
-    if (!safeOrderId) {
+    const resolvedId = safeOrderId ?? undefined;
+
+    if (!resolvedId) {
       return;
     }
 
-    onStatusChange(safeOrderId, nextStatus);
+    onStatusChange(resolvedId, nextStatus);
   };
 
   return (
@@ -149,7 +151,7 @@ export function OrderCard({ order, updating, highlighted = false, onStatusChange
           ) : null}
           <button
             type="button"
-            onClick={() => onDelete?.(safeOrderId)}
+            onClick={() => onDelete?.(safeOrderId ?? undefined)}
             disabled={updating || !safeOrderId}
             className="rounded-full bg-rose-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
