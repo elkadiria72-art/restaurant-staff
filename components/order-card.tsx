@@ -1,16 +1,14 @@
 'use client';
 
 import { Clock3, Sofa } from 'lucide-react';
-import { statusStyles, type Order, type OrderStatus } from '@/lib/types';
-
-type OrderCardStatus = OrderStatus | 'preparing' | 'served';
+import { normalizeOrderStatus, statusStyles, type Order, type OrderActionStatus } from '@/lib/types';
 
 type OrderCardProps = {
   order: Order;
   updating: boolean;
   highlighted?: boolean;
-  onStatusChange: (id: string | null | undefined, nextStatus: OrderCardStatus) => void;
-  onDelete?: (id: string | null | undefined) => void;
+  onStatusChange: (id: string, nextStatus: OrderActionStatus) => void;
+  onDelete?: (id: string) => void;
 };
 
 function getOrderId(value: unknown): string | null {
@@ -62,7 +60,7 @@ function parseItems(value: unknown): Array<{ name: string; quantity: number }> {
 export function OrderCard({ order, updating, highlighted = false, onStatusChange, onDelete }: OrderCardProps) {
   const safeOrderId = getOrderId(order?.id);
   const shortOrderId = String(order?.id ?? '').slice(0, 5);
-  const safeStatus = (typeof order?.status === 'string' ? order.status : 'Pending') as OrderStatus;
+  const safeStatus = normalizeOrderStatus(order?.status);
   const statusClass = statusStyles[safeStatus] ?? statusStyles.Pending;
 
   const tableNumber = typeof order?.table_number === 'number' && Number.isFinite(order.table_number)
@@ -72,14 +70,12 @@ export function OrderCard({ order, updating, highlighted = false, onStatusChange
   const totalPrice = Number.isFinite(Number(order?.total_price)) ? Number(order.total_price) : 0;
   const orderTime = formatOrderTime(order?.created_at);
 
-  const handleStatusChange = (nextStatus: OrderCardStatus) => {
-    const resolvedId = safeOrderId ?? undefined;
-
-    if (!resolvedId) {
+  const handleStatusChange = (nextStatus: OrderActionStatus) => {
+    if (!safeOrderId) {
       return;
     }
 
-    onStatusChange(resolvedId, nextStatus);
+    onStatusChange(safeOrderId, nextStatus);
   };
 
   return (
@@ -151,7 +147,11 @@ export function OrderCard({ order, updating, highlighted = false, onStatusChange
           ) : null}
           <button
             type="button"
-            onClick={() => onDelete?.(safeOrderId ?? undefined)}
+            onClick={() => {
+              if (safeOrderId) {
+                onDelete?.(safeOrderId);
+              }
+            }}
             disabled={updating || !safeOrderId}
             className="rounded-full bg-rose-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-50"
           >

@@ -1,4 +1,5 @@
 export type OrderStatus = 'Pending' | 'In Progress' | 'Served';
+export type OrderActionStatus = OrderStatus | 'preparing' | 'served';
 
 export type Order = {
   id: string;
@@ -16,3 +17,21 @@ export const statusStyles: Record<OrderStatus, string> = {
 };
 
 export const statusOrder: OrderStatus[] = ['Pending', 'In Progress', 'Served'];
+
+export function normalizeOrderStatus(value: unknown): OrderStatus {
+  if (typeof value !== 'string') {
+    return 'Pending';
+  }
+
+  const lower = value.trim().toLowerCase();
+
+  if (lower === 'in progress' || lower === 'in-progress' || lower === 'preparing') {
+    return 'In Progress';
+  }
+
+  if (lower === 'served') {
+    return 'Served';
+  }
+
+  return 'Pending';
+}

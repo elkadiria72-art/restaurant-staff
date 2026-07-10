@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { OrderCard } from '@/components/order-card';
 import { supabase } from '@/lib/supabase';
-import { statusOrder, type Order, type OrderStatus } from '@/lib/types';
+import { normalizeOrderStatus, statusOrder, type Order, type OrderActionStatus, type OrderStatus } from '@/lib/types';
 
 function normalizeOrder(value: unknown): Order | null {
   if (!value || typeof value !== 'object') {
@@ -55,7 +55,7 @@ function normalizeOrder(value: unknown): Order | null {
       typeof record.total_price === 'number' && Number.isFinite(record.total_price)
         ? record.total_price
         : Number(record.total_price) || 0,
-    status: typeof record.status === 'string' ? (record.status as OrderStatus) : 'Pending',
+    status: typeof record.status === 'string' ? normalizeOrderStatus(record.status) : 'Pending',
     created_at: typeof record.created_at === 'string' ? record.created_at : new Date().toISOString(),
   };
 }
@@ -74,13 +74,16 @@ export default function HomePage() {
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (error) throw error;
+        if (error) {
+          throw error;
+        }
 
         const parsedOrders = (data ?? [])
           .map((item) => normalizeOrder(item))
           .filter((item): item is Order => item !== null);
 
         setOrders(parsedOrders);
+        setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unable to load orders.');
       } finally {
@@ -88,25 +91,53 @@ export default function HomePage() {
       }
     };
 
-    fetchOrders();
+    void fetchOrders();
 
     const channel = supabase
-      .channel('any')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'orders' },
-        (payload) => {
-          console.log('New order received:', payload.new);
-
-          if (!payload.new) return;
-
-          const newOrder = normalizeOrder(payload.new);
-
-          if (newOrder) {
-            setOrders((prevOrders) => [newOrder, ...prevOrders.filter((order) => order.id !== newOrder.id)]);
-          }
+      .channel('staff-dashboard-orders', {
+        config: {
+          presence: { key: 'staff-dashboard' },
+        },
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, (payload) => {
+        if (!payload.new) {
+          return;
         }
-      )
+
+        const nextOrder = normalizeOrder(payload.new);
+
+        if (!nextOrder) {
+          return;
+        }
+
+        setOrders((current) => [nextOrder, ...current.filter((order) => order.id !== nextOrder.id)]);
+        setError(null);
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, (payload) => {
+        if (!payload.new) {
+          return;
+        }
+
+        const updatedOrder = normalizeOrder(payload.new);
+
+        if (!updatedOrder) {
+          return;
+        }
+
+        setOrders((current) => current.map((order) => (order.id === updatedOrder.id ? updatedOrder : order)));
+        setError(null);
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'orders' }, (payload) => {
+        const deletedId = typeof payload.old === 'object' && payload.old && 'id' in payload.old
+          ? String((payload.old as Record<string, unknown>).id ?? '')
+          : '';
+
+        if (!deletedId) {
+          return;
+        }
+
+        setOrders((current) => current.filter((order) => order.id !== deletedId));
+      })
       .subscribe();
 
     return () => {
@@ -114,29 +145,48 @@ export default function HomePage() {
     };
   }, []);
 
-  const handleStatusChange = (id: string, nextStatus: OrderStatus | 'preparing' | 'served') => {
-    const normalizedStatus: OrderStatus = nextStatus === 'preparing' ? 'In Progress' : nextStatus === 'served' ? 'Served' : nextStatus;
+  const handleStatusChange = async (id: string, nextStatus: OrderActionStatus) => {
+    if (!id.trim()) {
+      return;
+    }
+
+    const normalizedStatus = normalizeOrderStatus(nextStatus);
 
     setUpdatingId(id);
 
-    void (async () => {
-      try {
-        const { error } = await supabase.from('orders').update({ status: normalizedStatus }).eq('id', id);
+    try {
+      const { error } = await supabase.from('orders').update({ status: normalizedStatus }).eq('id', id);
 
-        if (error) {
-          setError(error.message);
-          return;
-        }
-
-        setOrders((current) =>
-          current.map((order) => (order.id === id ? { ...order, status: normalizedStatus } : order))
-        );
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unable to update order status.');
-      } finally {
-        setUpdatingId(null);
+      if (error) {
+        throw error;
       }
-    })();
+
+      setOrders((current) => current.map((order) => (order.id === id ? { ...order, status: normalizedStatus } : order)));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update order status.');
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const handleDeleteOrder = async (id: string) => {
+    if (!id.trim()) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase.from('orders').delete().eq('id', id);
+
+      if (error) {
+        throw error;
+      }
+
+      setOrders((current) => current.filter((order) => order.id !== id));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to delete order.');
+    }
   };
 
   const sortedOrders = useMemo(() => {
@@ -198,7 +248,12 @@ export default function HomePage() {
                   updating={updatingId === order.id}
                   onStatusChange={(id, status) => {
                     if (id) {
-                      handleStatusChange(id, status);
+                      void handleStatusChange(id, status);
+                    }
+                  }}
+                  onDelete={(id) => {
+                    if (id) {
+                      void handleDeleteOrder(id);
                     }
                   }}
                 />
