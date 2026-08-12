@@ -18,12 +18,35 @@ type WaiterCallAlert = {
   id: string;
   tableNumber: number | string;
   message: string;
+  tableId?: string;
+  timestamp?: string;
+  requestType?: string;
 };
 
 type OrderActionStatus = OrderStatus | 'preparing' | 'served';
 
-const ORDER_SOUND = typeof window === 'undefined' ? null : new Audio('/sound-ousis/order-sound.mp3');
-const CALL_SOUND = typeof window === 'undefined' ? null : new Audio('/sound-ousis/call-sound.mp3');
+// Initialize audio elements safely with available sound files
+const ORDER_SOUND = typeof window === 'undefined' ? null : (() => {
+  try {
+    const audio = new Audio('/sound-ousis/Sonner.mp3');
+    audio.preload = 'auto';
+    audio.volume = 0.7;
+    return audio;
+  } catch {
+    return null;
+  }
+})();
+
+const CALL_SOUND = typeof window === 'undefined' ? null : (() => {
+  try {
+    const audio = new Audio('/sound-ousis/Sonner2.mp3');
+    audio.preload = 'auto';
+    audio.volume = 0.8;
+    return audio;
+  } catch {
+    return null;
+  }
+})();
 
 function normalizeOrder(value: unknown): Order | null {
   if (!value || typeof value !== 'object') {
@@ -187,41 +210,97 @@ export default function StaffPage() {
       return;
     }
 
+    // Ensure audio context is initialized
+    if (!audioContextRef.current) {
+      const AudioCtor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtor) {
+        return;
+      }
+      audioContextRef.current = new AudioCtor();
+    }
+
+    // Try to play the actual sound file first
     try {
       const sound = kind === 'order' ? ORDER_SOUND : CALL_SOUND;
       if (sound) {
         sound.currentTime = 0;
-        await sound.play();
-        return;
+        const playPromise = sound.play();
+        if (playPromise !== undefined) {
+          await playPromise;
+          return;
+        }
       }
-    } catch {
-      // Ignore browser autoplay restrictions and keep the UI resilient.
+    } catch (err) {
+      // Ignore file play errors and fall back to web audio
     }
 
+    // Fallback to Web Audio API synthesized sound
     try {
       const context = audioContextRef.current;
       if (!context) {
         return;
       }
 
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
+      // Ensure context is running
+      if (context.state === 'suspended') {
+        try {
+          await context.resume();
+        } catch {
+          // Ignore resume errors
+        }
+      }
 
-      oscillator.type = kind === 'order' ? 'triangle' : 'sawtooth';
-      oscillator.frequency.setValueAtTime(kind === 'order' ? 880 : 620, context.currentTime);
-      oscillator.frequency.exponentialRampToValueAtTime(kind === 'order' ? 1320 : 780, context.currentTime + 0.16);
+      if (context.state !== 'running') {
+        return;
+      }
 
-      gain.gain.setValueAtTime(0.0001, context.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.3);
+      // Create a more attention-grabbing sound for waiter calls
+      if (kind === 'call') {
+        // Double beep for urgent waiter call
+        const playBeep = (startTime: number, freq: number, duration: number) => {
+          const osc = context.createOscillator();
+          const gain = context.createGain();
 
-      oscillator.connect(gain);
-      gain.connect(context.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, context.currentTime + startTime);
+          osc.frequency.exponentialRampToValueAtTime(freq * 1.2, context.currentTime + startTime + duration * 0.5);
 
-      oscillator.start();
-      oscillator.stop(context.currentTime + 0.32);
-    } catch {
-      // Ignore browser autoplay restrictions and keep the UI resilient.
+          gain.gain.setValueAtTime(0, context.currentTime + startTime);
+          gain.gain.exponentialRampToValueAtTime(0.25, context.currentTime + startTime + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.1, context.currentTime + startTime + duration * 0.8);
+          gain.gain.exponentialRampToValueAtTime(0, context.currentTime + startTime + duration);
+
+          osc.connect(gain);
+          gain.connect(context.destination);
+
+          osc.start(context.currentTime + startTime);
+          osc.stop(context.currentTime + startTime + duration);
+        };
+
+        // Play two beeps: high then low
+        playBeep(0, 1000, 0.2);
+        playBeep(0.25, 700, 0.2);
+      } else {
+        // Single beep for new orders
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+
+        oscillator.type = 'triangle';
+        oscillator.frequency.setValueAtTime(880, context.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(1320, context.currentTime + 0.16);
+
+        gain.gain.setValueAtTime(0.0001, context.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.3);
+
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+
+        oscillator.start();
+        oscillator.stop(context.currentTime + 0.32);
+      }
+    } catch (err) {
+      // Silently fail - audio is not critical to functionality
     }
   }, [audioEnabled]);
 
@@ -291,16 +370,30 @@ export default function StaffPage() {
         const record = payload.new as Record<string, unknown>;
         const callId = getRecordString(record, ['id']);
         const tableNumber = getRecordString(record, ['table_number', 'table', 'tableNumber']);
-        const message = getRecordString(record, ['message', 'details', 'request', 'reason', 'note', 'description']);
+        const tableId = getRecordString(record, ['table_id', 'tableId']);
+        const message = getRecordString(record, ['message', 'details', 'request', 'reason', 'note', 'description', 'request_type']);
+        const requestType = getRecordString(record, ['request_type', 'type']);
+        const timestamp = typeof record.created_at === 'string' ? record.created_at : new Date().toISOString();
 
         if (!callId) {
           return;
         }
 
+        // Determine the message based on request type
+        let displayMessage = message || 'المساعدة';
+        if (requestType.includes('bill') || displayMessage.includes('حساب')) {
+          displayMessage = 'طلب الحساب 💰';
+        } else if (requestType.includes('waiter') || displayMessage.includes('النادل')) {
+          displayMessage = 'استدعاء النادل 🔔';
+        }
+
         setActiveCallAlert({
           id: callId,
           tableNumber: tableNumber || '—',
-          message: message || 'المساعدة',
+          message: displayMessage,
+          tableId: tableId || '',
+          timestamp: timestamp,
+          requestType: requestType,
         });
         void playNotificationSound('call');
       })
@@ -422,26 +515,33 @@ export default function StaffPage() {
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(176,95,44,0.18),_rgba(10,10,12,1)_60%)] px-3 py-4 text-slate-100 sm:px-5 lg:px-8 lg:py-6" dir="rtl">
       {activeCallAlert ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-2xl rounded-[32px] border border-orange-400/60 bg-gradient-to-br from-orange-600 via-amber-500 to-red-600 p-1 shadow-[0_30px_120px_rgba(0,0,0,0.45)]">
-            <div className="rounded-[30px] bg-slate-950/95 p-6 text-center sm:p-8">
-              <p className="text-2xl font-black text-orange-300">⚠️ تنبيه عاجل</p>
-              <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">
-                ⚠️ تنبيه: طاولة رقم {activeCallAlert.tableNumber} تحتاج المساعدة
+        <div className="fixed inset-0 z-50 flex animate-pulse items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl animate-bounce rounded-[40px] border-4 border-orange-300 bg-gradient-to-br from-orange-600 via-red-500 to-rose-600 p-2 shadow-[0_0_60px_rgba(255,100,0,0.8)]">
+            <div className="rounded-[36px] bg-slate-950/98 p-8 text-center sm:p-12">
+              <div className="mb-4 text-5xl">🚨</div>
+              <p className="text-lg font-black uppercase tracking-[0.2em] text-orange-300">تنبيه فوري</p>
+              <h2 className="mt-4 text-4xl font-black text-white sm:text-5xl">
+                ⚠️ طاولة رقم <span className="text-orange-300">{activeCallAlert.tableNumber}</span>
               </h2>
-              <p className="mt-4 text-base text-slate-300">يحتاج هذا التنبيه إلى متابعة فورية من فريق الخدمة.</p>
-              <div className="mt-8 flex flex-wrap justify-center gap-3">
+              <p className="mt-3 text-2xl font-bold text-orange-200">{activeCallAlert.message}</p>
+              {activeCallAlert.timestamp && (
+                <p className="mt-2 text-sm text-slate-400">
+                  الوقت: {new Date(activeCallAlert.timestamp).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </p>
+              )}
+              <p className="mt-6 text-base text-slate-300">يحتاج هذا التنبيه إلى متابعة فورية من فريق الخدمة.</p>
+              <div className="mt-10 flex flex-wrap justify-center gap-4">
                 <button
                   type="button"
                   onClick={() => void handleHelped()}
-                  className="rounded-full bg-emerald-500 px-6 py-3 text-lg font-semibold text-slate-950 transition hover:bg-emerald-400"
+                  className="animate-pulse rounded-full bg-emerald-500 px-8 py-4 text-xl font-bold text-slate-950 shadow-lg shadow-emerald-500/50 transition hover:scale-105 hover:bg-emerald-400 hover:shadow-emerald-500/70"
                 >
-                  تمت المساعدة
+                  ✓ تمت المساعدة
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveCallAlert(null)}
-                  className="rounded-full border border-white/20 bg-white/10 px-6 py-3 text-lg font-semibold text-white transition hover:bg-white/20"
+                  className="rounded-full border-2 border-white/30 bg-white/10 px-8 py-4 text-xl font-bold text-white transition hover:bg-white/20"
                 >
                   إغلاق
                 </button>
@@ -509,18 +609,23 @@ export default function StaffPage() {
         ) : null}
 
         {activeCallAlert ? (
-          <div className="rounded-[24px] border border-orange-400/50 bg-gradient-to-r from-orange-600/25 via-amber-500/25 to-red-500/25 p-4 shadow-[0_10px_40px_rgba(255,140,0,0.2)]">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="animate-pulse rounded-[24px] border-2 border-orange-400 bg-gradient-to-r from-orange-600/40 via-red-500/40 to-rose-500/40 p-5 shadow-[0_0_40px_rgba(255,100,0,0.4)]">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-orange-200">تنبيه خدمة</p>
-                <h3 className="text-xl font-semibold text-white">⚠️ تنبيه: طاولة رقم {activeCallAlert.tableNumber} تحتاج المساعدة</h3>
+                <p className="text-lg font-black uppercase tracking-[0.3em] text-orange-200">🚨 تنبيه خدمة عاجل</p>
+                <h3 className="mt-2 text-2xl font-bold text-white sm:text-3xl">⚠️ طاولة رقم {activeCallAlert.tableNumber} - {activeCallAlert.message}</h3>
+                {activeCallAlert.timestamp && (
+                  <p className="mt-1 text-xs text-slate-300">
+                    {new Date(activeCallAlert.timestamp).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </p>
+                )}
               </div>
               <button
                 type="button"
                 onClick={() => void handleHelped()}
-                className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-400"
+                className="rounded-full bg-emerald-500 px-6 py-3 font-bold text-slate-950 shadow-lg shadow-emerald-500/40 transition hover:scale-105 hover:bg-emerald-400"
               >
-                تمت المساعدة
+                ✓ تم الانتهاء
               </button>
             </div>
           </div>
