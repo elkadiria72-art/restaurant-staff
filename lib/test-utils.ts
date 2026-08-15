@@ -56,8 +56,8 @@ export async function testNewOrder(tableNumber: number): Promise<void> {
             { name: 'تست برجر', quantity: 2 },
             { name: 'تست مشروب', quantity: 1 },
           ],
-          total_price: 25.99,
-          status: 'Pending',
+          total_amount: 25.99,
+          status: 'new',
           created_at: new Date().toISOString(),
         },
       ])

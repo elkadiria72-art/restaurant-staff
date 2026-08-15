@@ -124,8 +124,8 @@ export default function MenuPage() {
             table_number: Number(tableNumber),
             table_id: tableId,
             items: cart.map(item => ({ name: item.name, quantity: item.quantity })),
-            total_price: cartTotal,
-            status: 'Pending',
+            total_amount: cartTotal,
+            status: 'new',
             created_at: new Date().toISOString(),
           },
         ])
