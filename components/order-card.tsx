@@ -9,9 +9,35 @@ function time(value: string) { const date = new Date(value); return Number.isNaN
 
 export function OrderCard({ order, updating, highlighted, onStatusChange }: Props) {
   const action = nextStatus[order.status];
-  return <article className={`rounded-[22px] border p-3 shadow-lg shadow-black/20 ${highlighted ? 'border-amber-300 bg-amber-500/10 ring-2 ring-amber-400/40' : 'border-white/10 bg-slate-900/85'}`}>
-    <div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-2 text-sm text-slate-400"><Sofa size={14} /> طاولة {order.table_number}</div><h3 className="mt-1 text-lg font-semibold text-white">الطلب #{order.id.slice(0, 5)}</h3></div><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusStyles[order.status]}`}>{statusLabels[order.status]}</span></div>
-    <div className="mt-3 rounded-2xl border border-white/10 bg-slate-800/70 p-3"><div className="mb-2 flex items-center gap-2 text-xs text-slate-400"><Clock3 size={14} /> الوقت: {time(order.created_at)}</div>{order.items.length ? <div className="space-y-2">{order.items.map((item, index) => <div key={`${item.name}-${index}`} className="flex justify-between rounded-xl bg-slate-700/70 px-2.5 py-2 text-sm text-slate-100"><span>{item.quantity}× {item.name}</span>{item.price !== undefined && <span className="text-slate-400">{(item.price * item.quantity).toFixed(2)}</span>}</div>)}</div> : <p className="text-sm text-slate-400">لا توجد عناصر مسجلة</p>}{order.notes && <p className="mt-3 border-t border-white/10 pt-3 text-sm text-amber-100">ملاحظات: {order.notes}</p>}</div>
-    <div className="mt-3 flex items-center justify-between rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-3"><div><p className="text-[11px] tracking-[0.2em] text-slate-500">الإجمالي</p><p className="text-lg font-semibold text-white">{order.total_amount.toFixed(2)}</p></div>{action && <button type="button" disabled={updating} onClick={() => onStatusChange(order.id, action.status)} className="rounded-full bg-amber-500 px-3 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">{updating ? 'جارٍ التحديث...' : action.label}</button>}</div>
+  return <article className={`rounded-2xl border bg-white p-4 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover ${highlighted ? 'border-gold-300 animate-glow-soft' : 'border-stone-200/80'}`}>
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-ivory-200/80 px-2.5 py-1 text-xs font-medium text-stone-600">
+          <Sofa size={13} className="text-gold-600" /> طاولة {order.table_number}
+        </span>
+        <h3 className="mt-2 text-xl font-bold text-stone-900">الطلب <span className="tabular-nums">#{order.id.slice(0, 5)}</span></h3>
+      </div>
+      <span className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${statusStyles[order.status]}`}>{statusLabels[order.status]}</span>
+    </div>
+    <div className="mt-3 flex items-center gap-1.5 text-xs text-stone-400">
+      <Clock3 size={13} /> {time(order.created_at)}
+    </div>
+    <div className="mt-3 border-t border-stone-100 pt-3">
+      {order.items.length ? <ul className="space-y-1.5">{order.items.map((item, index) => <li key={`${item.name}-${index}`} className="flex items-center justify-between gap-3 rounded-xl bg-ivory-100/80 px-3 py-2 text-sm">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 rounded-md bg-gold-100 px-1.5 py-0.5 text-xs font-bold tabular-nums text-gold-700">{item.quantity}×</span>
+          <span className="truncate text-stone-800">{item.name}</span>
+        </span>
+        {item.price !== undefined && <span className="shrink-0 text-xs tabular-nums text-stone-400">{(item.price * item.quantity).toFixed(2)}</span>}
+      </li>)}</ul> : <p className="text-sm text-stone-400">لا توجد عناصر مسجلة</p>}
+      {order.notes && <p className="mt-3 rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-sm text-amber-900"><span className="font-semibold">ملاحظات: </span>{order.notes}</p>}
+    </div>
+    <div className="mt-4 flex items-center justify-between border-t border-stone-100 pt-3">
+      <div>
+        <p className="text-xs text-stone-400">الإجمالي</p>
+        <p className="text-lg font-bold tabular-nums text-stone-900">{order.total_amount.toFixed(2)}</p>
+      </div>
+      {action && <button type="button" disabled={updating} onClick={() => onStatusChange(order.id, action.status)} className="rounded-xl bg-gold-500 px-4 py-2.5 text-sm font-semibold text-stone-950 shadow-soft transition hover:bg-gold-600 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50">{updating ? 'جارٍ التحديث...' : action.label}</button>}
+    </div>
   </article>;
 }

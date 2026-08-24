@@ -16,8 +16,11 @@ export type Order = {
 export const statusOrder: OrderStatus[] = ['new', 'preparing', 'ready', 'served'];
 export const statusLabels: Record<OrderStatus, string> = { new: 'طلبات جديدة', preparing: 'قيد التحضير', ready: 'جاهز للتقديم', served: 'تم التقديم', cancelled: 'ملغي' };
 export const statusStyles: Record<OrderStatus, string> = {
-  new: 'bg-rose-500/15 text-rose-300 border-rose-500/40', preparing: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
-  ready: 'bg-sky-500/15 text-sky-300 border-sky-500/40', served: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40', cancelled: 'bg-slate-500/15 text-slate-300 border-slate-500/40',
+  new: 'bg-amber-50 text-amber-800 border-amber-200',
+  preparing: 'bg-orange-50 text-orange-800 border-orange-200',
+  ready: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  served: 'bg-stone-100 text-stone-600 border-stone-200',
+  cancelled: 'bg-rose-50 text-rose-800 border-rose-200',
 };
 
 export function normalizeOrderStatus(value: unknown): OrderStatus {

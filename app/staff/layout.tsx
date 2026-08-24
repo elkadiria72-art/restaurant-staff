@@ -30,44 +30,43 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950">
-      {/* Header with Logo */}
-      <header className="border-b border-white/10 bg-slate-950/80 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <div className="rounded-full bg-amber-500/20 p-2 ring-2 ring-amber-400/40">
-              <Bell size={24} className="text-amber-300" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-white">Elkahmed</h1>
-              <p className="text-xs text-slate-400">قـا أحمد - لوحة الخدمة</p>
+    <div dir="rtl" className="min-h-screen bg-ivory-100">
+      <header className="sticky top-0 z-40 border-b border-stone-200/80 bg-white/90 shadow-soft backdrop-blur-md">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between gap-4 py-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gold-100 text-gold-700 ring-1 ring-gold-200">
+                <Bell size={22} />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold leading-tight text-stone-900">Elkahmed</h1>
+                <p className="text-xs text-stone-500">قـا أحمد - لوحة الخدمة</p>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Tab Navigation */}
-        <nav className="border-t border-white/10 bg-slate-950/50">
-          <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 sm:px-6 lg:px-8">
+          {/* Tab Navigation */}
+          <nav className="flex items-center gap-1.5 pb-3">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               return (
                 <button
                   key={tab.id}
                   onClick={() => router.push(tab.href)}
-                  className={`flex items-center gap-2 border-b-2 px-4 py-4 font-semibold transition-colors ${
+                  className={`flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition-all active:scale-[0.98] ${
                     tab.active
-                      ? 'border-amber-400 text-amber-300'
-                      : 'border-transparent text-slate-400 hover:text-white'
+                      ? 'bg-stone-900 text-white shadow-soft'
+                      : 'text-stone-500 hover:bg-ivory-200/70 hover:text-stone-800'
                   }`}
                 >
-                  <Icon size={18} />
+                  <Icon size={17} />
                   <span className="hidden sm:inline">{tab.label}</span>
                   <span className="sm:hidden">{tab.label_en}</span>
                 </button>
               );
             })}
-          </div>
-        </nav>
+          </nav>
+        </div>
       </header>
 
       {/* Main Content */}

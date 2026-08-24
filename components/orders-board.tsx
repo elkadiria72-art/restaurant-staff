@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BellRing, CheckCircle2, Clock3, UtensilsCrossed } from 'lucide-react';
+import { BellRing, CheckCircle2, Clock3, Coffee, UtensilsCrossed, type LucideIcon } from 'lucide-react';
 import { OrderCard } from '@/components/order-card';
 import { supabase } from '@/lib/supabase';
 import { normalizeOrder, statusLabels, statusOrder, type Order, type OrderStatus } from '@/lib/types';
@@ -11,6 +11,14 @@ const callSoundPath = '/sound-ousis/Sonner2.mp3';
 
 type NotificationSound = 'order' | 'call';
 type AudioContextConstructor = typeof AudioContext;
+
+const columnVisuals: Record<OrderStatus, { dot: string; icon: LucideIcon; chip: string }> = {
+  new: { dot: 'bg-amber-400', icon: Clock3, chip: 'bg-amber-50 text-amber-600' },
+  preparing: { dot: 'bg-orange-400', icon: UtensilsCrossed, chip: 'bg-orange-50 text-orange-600' },
+  ready: { dot: 'bg-emerald-500', icon: CheckCircle2, chip: 'bg-emerald-50 text-emerald-600' },
+  served: { dot: 'bg-stone-300', icon: Coffee, chip: 'bg-stone-100 text-stone-500' },
+  cancelled: { dot: 'bg-rose-400', icon: BellRing, chip: 'bg-rose-50 text-rose-600' },
+};
 
 function idOf(value: unknown) { return typeof value === 'string' || typeof value === 'number' ? String(value) : ''; }
 function callText(row: Record<string, unknown>) { return typeof row.message === 'string' && row.message.trim() ? row.message : row.request_type === 'request_bill' ? 'طلب الحساب' : 'استدعاء النادل'; }
@@ -79,7 +87,12 @@ export function OrdersBoard() {
 
   useEffect(() => {
     const load = async () => {
-      const { data, error } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
+      // Live-board retention: show only the current service day. Older served
+      // orders stay in the database for Admin analytics but must not pile up
+      // indefinitely on the staff board (same day boundary as Admin views).
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const { data, error } = await supabase.from('orders').select('*').gte('created_at', startOfToday.toISOString()).order('created_at', { ascending: false });
       if (error) setError(error.message); else setOrders((data ?? []).map(normalizeOrder).filter((item): item is Order => item !== null));
       setLoading(false);
     };
@@ -117,11 +130,71 @@ export function OrdersBoard() {
   };
   const grouped = useMemo(() => Object.fromEntries(statusOrder.map((status) => [status, orders.filter((order) => order.status === status)])) as Record<OrderStatus, Order[]>, [orders]);
 
-  return <div className="space-y-4" dir="rtl">
-    {callAlert && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"><div className="w-full max-w-md rounded-3xl border-2 border-red-300 bg-slate-950 p-6 text-center shadow-2xl"><BellRing className="mx-auto text-red-300" size={38} /><p className="mt-3 text-xl font-bold text-white">نداء من طاولة {callAlert.table}</p><p className="mt-2 text-slate-300">{callAlert.message}</p><div className="mt-6 flex justify-center gap-3"><button onClick={() => void completeCall()} className="rounded-full bg-emerald-500 px-4 py-2 font-semibold text-slate-950">تمت المساعدة</button><button onClick={() => setCallAlert(null)} className="rounded-full border border-white/20 px-4 py-2 text-white">إغلاق</button></div></div></div>}
-    <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full border px-3 py-1.5 text-sm ${connected ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300' : 'border-amber-400/30 bg-amber-500/10 text-amber-200'}`}>{connected ? 'متصل مباشرة' : 'جاري الاتصال'}</span><button type="button" onClick={() => void unlockAudio()} className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-sm text-white"><BellRing className="inline" size={15} /> {audioEnabled ? 'أصوات التنبيهات مفعلة' : 'تفعيل أصوات التنبيهات'}</button></div>
-    {error && <p className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-3 text-rose-100">{error}</p>}
-    <div className="grid gap-3 sm:grid-cols-4">{statusOrder.map((status) => <div key={status} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4"><p className="text-sm text-slate-300">{statusLabels[status]}</p><p className="mt-2 text-3xl font-semibold text-white">{grouped[status].length}</p></div>)}</div>
-    <section className="grid gap-4 xl:grid-cols-4">{statusOrder.map((status) => <div key={status} className="min-h-80 rounded-3xl border border-white/10 bg-slate-950/70 p-3"><div className="mb-3 flex items-center gap-2 text-white">{status === 'new' ? <Clock3 size={16} /> : status === 'served' ? <CheckCircle2 size={16} /> : <UtensilsCrossed size={16} />}<h2>{statusLabels[status]}</h2></div>{loading ? <p className="text-sm text-slate-400">جاري تحميل الطلبات...</p> : grouped[status].length ? <div className="space-y-3">{grouped[status].map((order) => <OrderCard key={order.id} order={order} updating={updatingId === order.id} highlighted={highlightedId === order.id} onStatusChange={changeStatus} />)}</div> : <p className="text-sm text-slate-400">لا توجد طلبات حالياً.</p>}</div>)}</section>
+  return <div className="space-y-5" dir="rtl">
+    {callAlert && (
+      <div className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-stone-950/40 p-4 backdrop-blur-[2px]">
+        <div className="w-full max-w-md animate-pop-in rounded-3xl border border-stone-200 bg-white p-6 text-center shadow-xl shadow-stone-900/10 sm:p-8">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 ring-1 ring-rose-100">
+            <BellRing size={26} />
+          </div>
+          <p className="mt-4 text-sm font-semibold text-rose-500">نداء من طاولة</p>
+          <h3 className="mt-1 text-4xl font-bold tabular-nums text-stone-900">{callAlert.table}</h3>
+          <p className="mt-2 text-stone-600">{callAlert.message}</p>
+          <div className="mt-6 flex justify-center gap-3">
+            <button onClick={() => void completeCall()} className="rounded-xl bg-emerald-600 px-5 py-2.5 font-semibold text-white shadow-soft transition hover:bg-emerald-700 active:scale-[0.98]">تمت المساعدة</button>
+            <button onClick={() => setCallAlert(null)} className="rounded-xl border border-stone-200 bg-white px-5 py-2.5 font-medium text-stone-600 transition hover:bg-ivory-100 active:scale-[0.98]">إغلاق</button>
+          </div>
+        </div>
+      </div>
+    )}
+    <div className="flex flex-wrap items-center gap-2">
+      <span className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium ${connected ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+        <span className="relative flex h-2 w-2">
+          {connected && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />}
+          <span className={`relative inline-flex h-2 w-2 rounded-full ${connected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+        </span>
+        {connected ? 'متصل مباشرة' : 'جاري الاتصال'}
+      </span>
+      <button type="button" onClick={() => void unlockAudio()} className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium shadow-soft transition ${audioEnabled ? 'border-gold-200 bg-gold-50 text-gold-700' : 'border-stone-200 bg-white text-stone-700 hover:border-gold-300 hover:text-gold-700'}`}>
+        <BellRing size={15} /> {audioEnabled ? 'أصوات التنبيهات مفعلة' : 'تفعيل أصوات التنبيهات'}
+      </button>
+    </div>
+    {error && <p className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {statusOrder.map((status) => {
+        const visual = columnVisuals[status];
+        const Icon = visual.icon;
+        return <div key={status} className="flex items-center justify-between rounded-2xl border border-stone-200/80 bg-white p-4 shadow-soft">
+          <div>
+            <p className="text-sm text-stone-500">{statusLabels[status]}</p>
+            <p className="mt-1 text-3xl font-bold tabular-nums text-stone-900">{grouped[status].length}</p>
+          </div>
+          <span className={`flex h-11 w-11 items-center justify-center rounded-xl ${visual.chip}`}><Icon size={20} /></span>
+        </div>;
+      })}
+    </div>
+    <section className="grid gap-4 xl:grid-cols-4">
+      {statusOrder.map((status) => {
+        const visual = columnVisuals[status];
+        return <div key={status} className="min-h-80 rounded-3xl border border-stone-200/70 bg-ivory-200/50 p-3">
+          <div className="mb-3 flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <span className={`h-2 w-2 rounded-full ${visual.dot}`} />
+              <h2 className="text-sm font-semibold text-stone-700">{statusLabels[status]}</h2>
+            </div>
+            <span className="rounded-full border border-stone-200 bg-white px-2 py-0.5 text-xs font-medium tabular-nums text-stone-500">{grouped[status].length}</span>
+          </div>
+          {loading ? (
+            <div className="space-y-3">
+              {[0, 1, 2].map((index) => <div key={index} className="h-44 animate-pulse rounded-2xl border border-stone-200/50 bg-white/70" />)}
+            </div>
+          ) : grouped[status].length ? (
+            <div className="space-y-3">{grouped[status].map((order) => <OrderCard key={order.id} order={order} updating={updatingId === order.id} highlighted={highlightedId === order.id} onStatusChange={changeStatus} />)}</div>
+          ) : (
+            <p className="rounded-2xl border border-dashed border-stone-300/80 px-4 py-10 text-center text-sm text-stone-400">لا توجد طلبات حالياً.</p>
+          )}
+        </div>;
+      })}
+    </section>
   </div>;
 }
