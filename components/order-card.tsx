@@ -1,7 +1,8 @@
 'use client';
 
-import { Clock3, Sofa } from 'lucide-react';
+import { Clock3, Printer, Sofa } from 'lucide-react';
 import { statusLabels, statusStyles, type Order, type OrderStatus } from '@/lib/types';
+import { printReceipt } from '@/lib/receipt';
 
 type Props = { order: Order; updating: boolean; highlighted?: boolean; onStatusChange: (id: string, status: OrderStatus) => void };
 const nextStatus: Partial<Record<OrderStatus, { status: OrderStatus; label: string }>> = { new: { status: 'preparing', label: 'بدء التحضير' }, preparing: { status: 'ready', label: 'جاهز للتقديم' }, ready: { status: 'served', label: 'تم التقديم' } };
@@ -19,8 +20,11 @@ export function OrderCard({ order, updating, highlighted, onStatusChange }: Prop
       </div>
       <span className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${statusStyles[order.status]}`}>{statusLabels[order.status]}</span>
     </div>
-    <div className="mt-3 flex items-center gap-1.5 text-xs text-stone-400">
-      <Clock3 size={13} /> {time(order.created_at)}
+    <div className="mt-3 flex items-center justify-between gap-2 text-xs text-stone-400">
+      <span className="flex items-center gap-1.5"><Clock3 size={13} /> {time(order.created_at)}</span>
+      <button type="button" onClick={() => printReceipt(order)} title="طباعة إيصال حراري" className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2.5 py-1 font-medium text-stone-600 transition hover:border-gold-300 hover:text-gold-700 active:scale-[0.98]">
+        <Printer size={13} /> طباعة
+      </button>
     </div>
     <div className="mt-3 border-t border-stone-100 pt-3">
       {order.items.length ? <ul className="space-y-1.5">{order.items.map((item, index) => <li key={`${item.name}-${index}`} className="flex items-center justify-between gap-3 rounded-xl bg-ivory-100/80 px-3 py-2 text-sm">

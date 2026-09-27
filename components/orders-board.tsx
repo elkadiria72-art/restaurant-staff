@@ -1,27 +1,24 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BellRing, CheckCircle2, Clock3, Coffee, UtensilsCrossed, type LucideIcon } from 'lucide-react';
+import { CheckCircle2, Clock3, Coffee, UtensilsCrossed, type LucideIcon } from 'lucide-react';
 import { OrderCard } from '@/components/order-card';
 import { supabase } from '@/lib/supabase';
 import { normalizeOrder, statusLabels, statusOrder, type Order, type OrderStatus } from '@/lib/types';
-
-const orderSoundPath = '/sound-ousis/Sonner.mp3';
-const callSoundPath = '/sound-ousis/Sonner2.mp3';
-
-type NotificationSound = 'order' | 'call';
-type AudioContextConstructor = typeof AudioContext;
 
 const columnVisuals: Record<OrderStatus, { dot: string; icon: LucideIcon; chip: string }> = {
   new: { dot: 'bg-amber-400', icon: Clock3, chip: 'bg-amber-50 text-amber-600' },
   preparing: { dot: 'bg-orange-400', icon: UtensilsCrossed, chip: 'bg-orange-50 text-orange-600' },
   ready: { dot: 'bg-emerald-500', icon: CheckCircle2, chip: 'bg-emerald-50 text-emerald-600' },
   served: { dot: 'bg-stone-300', icon: Coffee, chip: 'bg-stone-100 text-stone-500' },
-  cancelled: { dot: 'bg-rose-400', icon: BellRing, chip: 'bg-rose-50 text-rose-600' },
+  cancelled: { dot: 'bg-rose-400', icon: Coffee, chip: 'bg-rose-50 text-rose-600' },
 };
 
 function idOf(value: unknown) { return typeof value === 'string' || typeof value === 'number' ? String(value) : ''; }
-function callText(row: Record<string, unknown>) { return typeof row.message === 'string' && row.message.trim() ? row.message : row.request_type === 'request_bill' ? 'طلب الحساب' : 'استدعاء النادل'; }
+
+/** Board ordering rule (oldest -> newest) — realtime events must never shuffle it. */
+const byCreatedAsc = (a: Order, b: Order) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+const sortAsc = (list: Order[]) => [...list].sort(byCreatedAsc);
 
 export function OrdersBoard() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -29,61 +26,8 @@ export function OrdersBoard() {
   const [error, setError] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
-  const [audioEnabled, setAudioEnabled] = useState(false);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
-  const [callAlert, setCallAlert] = useState<{ id: string; table: string; message: string } | null>(null);
-  const audioUnlocked = useRef(false);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const soundBuffersRef = useRef<Partial<Record<NotificationSound, AudioBuffer>>>({});
-  const playedOrderIds = useRef(new Set<string>());
-  const playedCallIds = useRef(new Set<string>());
-
-  const play = useCallback((sound: NotificationSound) => {
-    const context = audioContextRef.current;
-    const buffer = soundBuffersRef.current[sound];
-    if (!audioUnlocked.current || !context || context.state !== 'running' || !buffer) return;
-
-    // A new source is required for every alert; AudioBufferSourceNode objects cannot be reused.
-    const source = context.createBufferSource();
-    const gain = context.createGain();
-    source.buffer = buffer;
-    gain.gain.value = 0.8;
-    source.connect(gain);
-    gain.connect(context.destination);
-    source.start();
-  }, []);
-
-  const unlockAudio = useCallback(async () => {
-    const AudioContextCtor = window.AudioContext || (window as Window & { webkitAudioContext?: AudioContextConstructor }).webkitAudioContext;
-    if (!AudioContextCtor) return;
-
-    const context = audioContextRef.current ?? new AudioContextCtor();
-    audioContextRef.current = context;
-
-    try {
-      if (context.state === 'suspended') await context.resume();
-      const sounds: [NotificationSound, string][] = [['order', orderSoundPath], ['call', callSoundPath]];
-      await Promise.all(sounds.map(async ([kind, path]) => {
-        if (soundBuffersRef.current[kind]) return;
-        const response = await fetch(path);
-        if (!response.ok) throw new Error(`Unable to load ${path}`);
-        soundBuffersRef.current[kind] = await context.decodeAudioData(await response.arrayBuffer());
-      }));
-      audioUnlocked.current = context.state === 'running';
-      setAudioEnabled(audioUnlocked.current);
-    } catch {
-      audioUnlocked.current = false;
-      setAudioEnabled(false);
-    }
-  }, []);
-
-  const rememberPlayed = (seen: Set<string>, id: string) => {
-    if (seen.has(id)) return false;
-    seen.add(id);
-    // Retain enough event IDs for a long shift while keeping memory bounded.
-    if (seen.size > 1000) seen.delete(seen.values().next().value as string);
-    return true;
-  };
+  const highlightTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -92,7 +36,7 @@ export function OrdersBoard() {
       // indefinitely on the staff board (same day boundary as Admin views).
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
-      const { data, error } = await supabase.from('orders').select('*').gte('created_at', startOfToday.toISOString()).order('created_at', { ascending: false });
+      const { data, error } = await supabase.from('orders').select('*').gte('created_at', startOfToday.toISOString()).order('created_at', { ascending: true });
       if (error) setError(error.message); else setOrders((data ?? []).map(normalizeOrder).filter((item): item is Order => item !== null));
       setLoading(false);
     };
@@ -102,51 +46,42 @@ export function OrdersBoard() {
     // delivery on the other channel.
     const ordersChannel = supabase.channel('staff-orders')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
-        const order = normalizeOrder(payload.new);
         if (payload.eventType === 'DELETE') { const id = idOf(payload.old.id); setOrders((current) => current.filter((item) => item.id !== id)); return; }
+        const order = normalizeOrder(payload.new);
         if (!order) return;
-        setOrders((current) => [order, ...current.filter((item) => item.id !== order.id)]);
-        if (payload.eventType === 'INSERT' && rememberPlayed(playedOrderIds.current, order.id)) { setHighlightedId(order.id); play('order'); window.setTimeout(() => setHighlightedId(null), 2500); }
+        // Upsert then keep the canonical oldest->newest order; realtime arrival
+        // must not reorder the list, only fill it in.
+        setOrders((current) => sortAsc([...current.filter((item) => item.id !== order.id), order]));
       })
       .subscribe((status) => { setConnected(status === 'SUBSCRIBED'); if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setError('فشل الاتصال المباشر مع Supabase.'); });
-    const callsChannel = supabase.channel('staff-calls-alerts')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'waiter_calls' }, (payload) => {
-        const row = payload.new as Record<string, unknown>; if (String(row.status ?? 'pending').toLowerCase() !== 'pending') return;
-        const id = idOf(row.id); if (!id || !rememberPlayed(playedCallIds.current, id)) return; setCallAlert({ id, table: String(row.table_number ?? '—'), message: callText(row) }); play('call');
-      })
-      .subscribe();
-    return () => { void supabase.removeChannel(ordersChannel); void supabase.removeChannel(callsChannel); };
-  }, [play]);
+    return () => { void supabase.removeChannel(ordersChannel); };
+  }, []);
 
-  useEffect(() => () => { void audioContextRef.current?.close(); }, []);
+  // Sound/toast for new orders live in StaffAlertsProvider; the board only
+  // flashes the card so the new order is easy to find in the ordered list.
+  useEffect(() => {
+    const onNewOrder = (event: Event) => {
+      const detail = (event as CustomEvent<{ id: string }>).detail;
+      if (!detail?.id) return;
+      setHighlightedId(detail.id);
+      if (highlightTimer.current) window.clearTimeout(highlightTimer.current);
+      highlightTimer.current = window.setTimeout(() => setHighlightedId(null), 6000);
+    };
+    window.addEventListener('staff:new-order', onNewOrder);
+    return () => {
+      window.removeEventListener('staff:new-order', onNewOrder);
+      if (highlightTimer.current) window.clearTimeout(highlightTimer.current);
+    };
+  }, []);
 
-  const changeStatus = async (id: string, status: OrderStatus) => {
+  const changeStatus = useCallback(async (id: string, status: OrderStatus) => {
     setUpdatingId(id); const { error } = await supabase.from('orders').update({ status }).eq('id', id);
     if (error) setError(error.message); else setOrders((current) => current.map((order) => order.id === id ? { ...order, status } : order)); setUpdatingId(null);
-  };
-  const completeCall = async () => {
-    if (!callAlert) return; const { error } = await supabase.from('waiter_calls').update({ status: 'completed' }).eq('id', callAlert.id);
-    if (error) setError(error.message); else setCallAlert(null);
-  };
+  }, []);
+
   const grouped = useMemo(() => Object.fromEntries(statusOrder.map((status) => [status, orders.filter((order) => order.status === status)])) as Record<OrderStatus, Order[]>, [orders]);
 
   return <div className="space-y-5" dir="rtl">
-    {callAlert && (
-      <div className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-stone-950/40 p-4 backdrop-blur-[2px]">
-        <div className="w-full max-w-md animate-pop-in rounded-3xl border border-stone-200 bg-white p-6 text-center shadow-xl shadow-stone-900/10 sm:p-8">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 ring-1 ring-rose-100">
-            <BellRing size={26} />
-          </div>
-          <p className="mt-4 text-sm font-semibold text-rose-500">نداء من طاولة</p>
-          <h3 className="mt-1 text-4xl font-bold tabular-nums text-stone-900">{callAlert.table}</h3>
-          <p className="mt-2 text-stone-600">{callAlert.message}</p>
-          <div className="mt-6 flex justify-center gap-3">
-            <button onClick={() => void completeCall()} className="rounded-xl bg-emerald-600 px-5 py-2.5 font-semibold text-white shadow-soft transition hover:bg-emerald-700 active:scale-[0.98]">تمت المساعدة</button>
-            <button onClick={() => setCallAlert(null)} className="rounded-xl border border-stone-200 bg-white px-5 py-2.5 font-medium text-stone-600 transition hover:bg-ivory-100 active:scale-[0.98]">إغلاق</button>
-          </div>
-        </div>
-      </div>
-    )}
     <div className="flex flex-wrap items-center gap-2">
       <span className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium ${connected ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
         <span className="relative flex h-2 w-2">
@@ -155,9 +90,6 @@ export function OrdersBoard() {
         </span>
         {connected ? 'متصل مباشرة' : 'جاري الاتصال'}
       </span>
-      <button type="button" onClick={() => void unlockAudio()} className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium shadow-soft transition ${audioEnabled ? 'border-gold-200 bg-gold-50 text-gold-700' : 'border-stone-200 bg-white text-stone-700 hover:border-gold-300 hover:text-gold-700'}`}>
-        <BellRing size={15} /> {audioEnabled ? 'أصوات التنبيهات مفعلة' : 'تفعيل أصوات التنبيهات'}
-      </button>
     </div>
     {error && <p className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
